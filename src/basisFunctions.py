@@ -79,8 +79,21 @@ class BasisSet(ABC):
         return (X, tts, yy, window_rounded);
 
 
-    def convolve_continuous_event(self, Stim : np.array(), window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray,np.ndarray]:
+    def convolve_continuous_event(self, Stim : np.array, window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray,np.ndarray,tuple[int,int]]:
+        """
+        Convolves the basis with a continuous (1-D only) signal for building a design matrix.
 
+        Args
+          Stim: an array containing the stimulus values over time (binned time - does not covert frames/seconds to bins)
+          window: (start, end) first and last (exclusive) time points of the convolution in ms
+          floor_start: if True, makes the window start equal to a multiple of :attr:`bin_size_ms`.
+
+        Returns:
+          (X, tts, window_rounded) : X (np.ndarray) [T x P], basis convolved by time
+                        tts (np.ndarray) [T] - time points of rows of X in ms
+                        window_rounded (tuple[int,int]) - the time bins
+
+        """
         
         (T_bins, window_rounded, tts) = fix_window(self.bin_size_ms, window, floor_start)
 
@@ -398,3 +411,29 @@ class ModifiedCardinalSpline(BasisSet):
         The knot locations (in ms).
         """
         return self._c_pt
+
+
+def getRGCStimBasis(bin_size_ms : float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    A simple default basis to use for stimulus-dependent conductance filters made with a modified cardinal spline.
+
+    Args:
+      bin_size_ms: time bin size in milliseconds
+
+    Returns:
+      A ModifiedCardinalSpline containing the basis
+    """
+    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=True);
+
+def getRGCSpkHistBasis(bin_size_ms : float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    A simple default basis to use for spike history filters made with a modified cardinal spline.
+
+    Args:
+      bin_size_ms: time bin size in milliseconds
+
+    Returns:
+      A ModifiedCardinalSpline containing the basis
+    """
+    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 1, 2, 4, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=False);
+    
