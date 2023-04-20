@@ -1,0 +1,28 @@
+[project]
+name = "pyGLMcoupling"
+version = "0.1"
+description = "Experiments for testing coupling between spiking neurons in a GLM(ish) framework."
+authors = [
+    {"name" = "Kenneth Latimer", "email" = "latimerkw@gmail.com"}
+]
+license = {"file" = "LICENSE"}
+readme = "README.md"
+requires-python = ">3.9"
+
+
+# Requirements
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "h5py",
+    "pandas",
+    "torch"
+]
+
+
+[project.urls]
+homepage = "https://github.com/latimerk/GLMCoupling/"
+repository = "https://github.com/latimerk/GLMCoupling/"
+documentation = "https://github.com/latimerk/GLMCoupling/"

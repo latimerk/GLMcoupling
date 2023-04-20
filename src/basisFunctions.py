@@ -3,24 +3,23 @@ from scipy.linalg import orth
 from abc import ABC
 from scipy.signal import convolve2d
 
-def fix_window(bin_size_ms : float,window : tuple[float,float], floor_start : bool = True):
+def fix_window(bin_size_ms : float,window : tuple[float,float], floor_start : bool = True, binned_times : bool = False):
     assert len(window) == 2, "window must have two elements"
+    window_0 = window[0]
     if(floor_start):
-        window[0] -= (window[0] % bin_size_ms);
-    T_bins = np.floor((window[1] - window[0]) / bin_size_ms);
+        window_0 -= (window[0] % bin_size_ms);
+    T_bins = np.floor((window[1] - window_0) / bin_size_ms).astype(int);
     assert T_bins > 0, "window must contain at least one timebin"
 
-    window_rounded = (window[0], T_bins * bin_size_ms);
-    tts = np.arange(window_rounded[0], window_rounded[1], bin_size_ms);
-    return (T_bins, window_rounded, tts);
+    window_0_bins = np.floor(window_0 / bin_size_ms).astype(int);
+    window_bins = (window_0_bins, window_0_bins + T_bins);
+    window_rounded = (window_0, window_0 + T_bins * bin_size_ms);
+    if binned_times:
+        tts = np.arange(window_bins[0], window_bins[1]);
+    else:
+        tts = np.arange(window_rounded[0], window_rounded[1], bin_size_ms);
+    return (T_bins, window_rounded, tts,window_bins);
 
-def vectorize_spikes(bin_size_ms : float, times : list, window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray,np.ndarray,tuple[int,int]]:
-    (T_bins, window_rounded, tts) = fix_window(bin_size_ms, window, floor_start);
-
-    # bin times
-    yy , *_ = np.histogram(times, tts);
-
-    return (tts, yy, T_bins, window_rounded);
 
 
 # basis function builder
@@ -60,23 +59,29 @@ class BasisSet(ABC):
         Convolves the basis with a set of times for building a design matrix.
 
         Args
-          times: a list of event times in ms
+          times: a list of event times in ms 
           window: (start, end) first and last (exclusive) time points of the convolution in ms
           floor_start: if True, makes the window start equal to a multiple of :attr:`bin_size_ms`.
 
         Returns:
-          (X, tts, y, window_rounded) : X (np.ndarray) [T x P], basis convolved by time
+          (X, tts,  window_rounded) : X (np.ndarray) [T x P], basis convolved by time
                         tts (np.ndarray) [T] - time points of rows of X in ms
-                        y (np.ndarray) [T] - the binned events
-                        window_rounded (tuple[int,int]) - the time bins
+                        window_rounded (tuple[int,int]) - the time bins in ms
+                        window_bins (tuple[int,int]) - the time bins
 
         """
-        (tts, yy, T_bins, window_rounded) = vectorize_spikes(self.bin_size_ms, times, window, floor_start);
         
+        (T_bins, window_rounded, tts, window_bins) = fix_window(self.bin_size_ms, window, floor_start)
+
+        
+        #window_conv = (window_bins[0] -  self._first_offset + self._last_offset, window_bins[1] + self._last_offset);
+        tts_padded = np.arange(window_rounded[0] - (self._first_offset - self._last_offset)*self.bin_size_ms, window_rounded[1],self.bin_size_ms)
+        yy , *_ = np.histogram(times, tts_padded);
+
         # do convolution
         X = self._do_convolution(yy,T_bins);
 
-        return (X, tts, yy, window_rounded);
+        return (X, tts, window_rounded, window_bins);
 
 
     def convolve_continuous_event(self, Stim : np.array, window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray,np.ndarray,tuple[int,int]]:
@@ -89,23 +94,24 @@ class BasisSet(ABC):
           floor_start: if True, makes the window start equal to a multiple of :attr:`bin_size_ms`.
 
         Returns:
-          (X, tts, window_rounded) : X (np.ndarray) [T x P], basis convolved by time
+          (X, tts, window_rounded, window_bins) : X (np.ndarray) [T x P], basis convolved by time
                         tts (np.ndarray) [T] - time points of rows of X in ms
-                        window_rounded (tuple[int,int]) - the time bins
-
+                        window_rounded (tuple[int,int]) - the time bins in ms
+                        window_bins (tuple[int,int]) - the binned time
         """
         
-        (T_bins, window_rounded, tts) = fix_window(self.bin_size_ms, window, floor_start)
+        (T_bins, window_rounded, tts, window_bins) = fix_window(self.bin_size_ms, window, floor_start)
 
         assert Stim.ndim == 1, "Stim must be one dimensional array"
-        window_conv = (window_rounded[0] -  self._first_offset, window_rounded[1] - self._last_offset);
+        window_conv = (window_bins[0] -  self._first_offset + self._last_offset, window_bins[1] + self._last_offset);
+        assert window_conv[0] >= 0, "Window invalid for given basis length: does not auto-pad with zeros"
         assert len(Stim) > window_conv[1], "Stim must be at least length " + str(window_conv[1]) + ", received length " + str(len(Stim))
 
         Stim_0 = Stim[window_conv[0]:window_conv[1]]
 
         X = self._do_convolution(Stim_0,T_bins);
 
-        return (X, tts,  window_rounded);
+        return (X, tts,  window_rounded, window_bins);
 
 
     def get_row_indices_for_point_events(self, event_times : list, window : tuple[float,float], set_invalid_to_none : bool = False, floor_start : bool = False) -> tuple[np.ndarray,np.ndarray]:
@@ -123,15 +129,7 @@ class BasisSet(ABC):
                      tts (np.ndarray) [T] - time points of rows of X in ms
 
         """
-        assert len(window) == 2, "window must have two elements"
-        if(floor_start):
-            window[0] -= (window[0] % self.bin_size_ms);
-        T_bins = np.floor((window[1] - window[0]) / self.bin_size_ms);
-        assert T_bins > 0, "window must contain at least one timebin"
-
-        window_rounded = (window[0], window[0] + T_bins * self.bin_size_ms);
-        tts = np.arange(window_rounded[0], window_rounded[1], self.bin_size_ms);
-
+        (T_bins, window_rounded, tts, window_bins) = fix_window(self.bin_size_ms, window, floor_start)
         event_times = np.array(event_times);
         
         X_0 = tts.reshape((tts.size, 1)) - event_times.reshape((1, event_times.size));
@@ -146,14 +144,12 @@ class BasisSet(ABC):
     @property
     def _first_offset(self) -> int:
         assert hasattr(self, '_B'), "Basis not initialized!"
-        return -np.floor(self.T[0]/self.bin_size_ms) + self.B.shape[0]
+        return -np.floor(self.T[0]/self.bin_size_ms).astype(int) + (self.B.shape[0])
 
     @property
     def _last_offset(self) -> int:
         assert hasattr(self, '_B'), "Basis not initialized!"
-        return -np.floor(self.T[0]/self.bin_size_ms) 
-        # return self._first_offset - self.B.shape[0]
-        # return -np.floor(self.T[-1]/self.bin_size_ms) + self.B.shape[0]
+        return self._first_offset - self.B.shape[0]
 
     @property
     def BT(self) -> int:
@@ -413,27 +409,28 @@ class ModifiedCardinalSpline(BasisSet):
         return self._c_pt
 
 
-def getRGCStimBasis(bin_size_ms : float) -> tuple[np.ndarray, np.ndarray]:
+def getRGCStimBasis(bin_size_ms : float, orthogonalize : bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
     A simple default basis to use for stimulus-dependent conductance filters made with a modified cardinal spline.
 
     Args:
       bin_size_ms: time bin size in milliseconds
+      orthogonalize: return orthonormal basis if True, otherwise returns splines
 
     Returns:
       A ModifiedCardinalSpline containing the basis
     """
-    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=True);
+    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=True, orthogonalize=orthogonalize);
 
-def getRGCSpkHistBasis(bin_size_ms : float) -> tuple[np.ndarray, np.ndarray]:
+def getRGCSpkHistBasis(bin_size_ms : float, orthogonalize : bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
     A simple default basis to use for spike history filters made with a modified cardinal spline.
 
     Args:
-      bin_size_ms: time bin size in milliseconds
+      bin_size_ms: time bin size in milliseconds, otherwise returns splines
 
     Returns:
       A ModifiedCardinalSpline containing the basis
     """
-    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 1, 2, 4, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=False);
+    return ModifiedCardinalSpline((bin_size_ms, 190), [0, 1, 2, 4, 8, 16, 24, 32, 40, 48, 64, 96, 128, 160, 192], bin_size_ms=bin_size_ms, zero_last=False, zero_first=False, orthogonalize=orthogonalize);
     
