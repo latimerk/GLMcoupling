@@ -54,36 +54,6 @@ class BasisSet(ABC):
 
         return X;
 
-    def convolve_point_events(self, times : list, window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[int,int]]:
-        """
-        Convolves the basis with a set of times for building a design matrix.
-
-        Args
-          times: a list of event times in ms 
-          window: (start, end) first and last (exclusive) time points of the convolution in ms
-          floor_start: if True, makes the window start equal to a multiple of :attr:`bin_size_ms`.
-
-        Returns:
-          (X, tts,  window_rounded) : X (np.ndarray) [T x P], basis convolved by time
-                        tts (np.ndarray) [T] - time points of rows of X in ms
-                        window_rounded (tuple[int,int]) - the time bins in ms
-                        window_bins (tuple[int,int]) - the time bins
-
-        """
-        
-        (T_bins, window_rounded, tts, window_bins) = fix_window(self.bin_size_ms, window, floor_start)
-
-        
-        #window_conv = (window_bins[0] -  self._first_offset + self._last_offset, window_bins[1] + self._last_offset);
-        tts_padded = np.arange(window_rounded[0] - (self._first_offset - self._last_offset)*self.bin_size_ms, window_rounded[1],self.bin_size_ms)
-        yy , *_ = np.histogram(times, tts_padded);
-
-        # do convolution
-        X = self._do_convolution(yy,T_bins);
-
-        return (X, tts, window_rounded, window_bins);
-
-
     def convolve_continuous_event(self, Stim : np.array, window : tuple[float,float], floor_start : bool = True) -> tuple[np.ndarray,np.ndarray,tuple[int,int]]:
         """
         Convolves the basis with a continuous (1-D only) signal for building a design matrix.
@@ -112,6 +82,40 @@ class BasisSet(ABC):
         X = self._do_convolution(Stim_0,T_bins);
 
         return (X, tts,  window_rounded, window_bins);
+
+
+    def convolve_point_events(self, times : list, window : tuple[float,float], floor_start : bool = True, binned_events : bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[int,int]]:
+        """
+        Convolves the basis with a set of times for building a design matrix.
+
+        Args
+          times: a list of event times in ms (or bins if binned_events == True)
+          window: (start, end) first and last (exclusive) time points of the convolution in ms
+          floor_start: if True, makes the window start equal to a multiple of :attr:`bin_size_ms`.
+          binned_events: whether the times are in bins (True) or ms (False)
+
+        Returns:
+          (X, tts,  window_rounded) : X (np.ndarray) [T x P], basis convolved by time
+                        tts (np.ndarray) [T] - time points of rows of X in ms
+                        window_rounded (tuple[int,int]) - the time bins in ms
+                        window_bins (tuple[int,int]) - the time bins
+
+        """
+        
+        (T_bins, window_rounded, tts, window_bins) = fix_window(self.bin_size_ms, window, floor_start);
+
+        if binned_events:
+            window_conv = (window_bins[0] -  self._first_offset + self._last_offset, window_bins[1] + self._last_offset);
+            tts_padded = np.arange(window_conv[0] - (self._first_offset - self._last_offset), window_conv[1]);
+        else:
+            tts_padded = np.arange(window_rounded[0] - (self._first_offset - self._last_offset)*self.bin_size_ms, window_rounded[1],self.bin_size_ms);
+
+        yy , *_ = np.histogram(times, tts_padded);
+
+        # do convolution
+        X = self._do_convolution(yy,T_bins);
+
+        return (X, tts, window_rounded, window_bins);
 
 
     def get_row_indices_for_point_events(self, event_times : list, window : tuple[float,float], set_invalid_to_none : bool = False, floor_start : bool = False) -> tuple[np.ndarray,np.ndarray]:
